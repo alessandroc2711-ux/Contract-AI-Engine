@@ -76,9 +76,6 @@ class AIEngine:
             except Exception:
                 return {"error": "invalid_json", "raw": text}
 
-    # =========================
-    # 🔥 ROBUST MAPPING (EXAMPLE-GROUNDED)
-    # =========================
     def build_mapping(
         self,
         template_fields,
@@ -134,13 +131,9 @@ OUTPUT FORMAT:
         )
 
         result = self.safe_json_loads(res.choices[0].message.content)
-
         st.session_state["debug_mapping_raw_fields"] = result
         return result
 
-    # =========================
-    # 🔥 ROBUST EXTRACTION (EVIDENCE + SCHEMA CONSISTENCY)
-    # =========================
     def extract_fields(self, mapping, new_request, new_event):
 
         allowed_fields = [f["field_name"] for f in mapping.get("fields", [])]
@@ -197,11 +190,9 @@ OUTPUT FORMAT:
         )
 
         raw = res.choices[0].message.content
-
         st.session_state["debug_extraction_raw_output"] = raw
 
         result = self.safe_json_loads(raw)
-
         st.session_state["debug_extraction_parsed"] = result
 
         if not isinstance(result, dict):
@@ -217,16 +208,16 @@ OUTPUT FORMAT:
         ]
 
         result["fields"] = filtered
-
         st.session_state["debug_extraction_after_filter"] = filtered
 
         return result
 
 
 # =========================
-# DOCUMENT PARSER (UNCHANGED)
+# DOCUMENT PARSER (ONLY FIX HERE)
 # =========================
 class DocumentParser:
+
     def parse(self, path):
         ext = os.path.splitext(path)[-1].lower()
         if ext == ".pdf":
@@ -240,13 +231,32 @@ class DocumentParser:
         ocr_text = self._ocr(path)
         return {"text": self._merge(text_layer, ocr_text)}
 
+    # 🔥 MINIMAL FIX: footer/header-safe extraction without changing pipeline
     def _text_layer(self, path):
         out = []
         with pdfplumber.open(path) as pdf:
             for p in pdf.pages:
+
+                # 1) standard extraction
                 t = p.extract_text()
+
+                # 2) layout fallback (fix footer issue)
+                if not t:
+                    t = p.extract_text(layout=True)
+
+                # 3) tolerance-based fallback (shifted footer text)
+                if not t:
+                    t = p.extract_text(x_tolerance=2, y_tolerance=2)
+
+                # 4) last resort: word reconstruction
+                if not t:
+                    words = p.extract_words()
+                    if words:
+                        t = " ".join(w.get("text", "") for w in words)
+
                 if t:
                     out.append(t)
+
         return "\n".join(out)
 
     def _ocr(self, path):
@@ -319,9 +329,6 @@ def extract_template_fields(text):
     return sorted(set(raw))
 
 
-# =========================
-# SAFE REPLACEMENT (UNCHANGED)
-# =========================
 def replace_docx(doc, repl):
     safe_map = {f"{{{{{k}}}}}": str(v) for k, v in repl.items()}
 
