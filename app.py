@@ -231,26 +231,38 @@ class DocumentParser:
         ocr_text = self._ocr(path)
         return {"text": self._merge(text_layer, ocr_text)}
 
-    # 🔥 MINIMAL FIX: footer/header-safe extraction without changing pipeline
+    # =========================
+    # FIX: ROBUST FOOTER EXTRACTION (DEPLOY SAFE)
+    # =========================
     def _text_layer(self, path):
         out = []
+
         with pdfplumber.open(path) as pdf:
             for p in pdf.pages:
 
-                # 1) standard extraction
-                t = p.extract_text()
+                t = None
 
-                # 2) layout fallback (fix footer issue)
+                # 1) 🔥 most robust in cloud: word-based extraction
+                words = p.extract_words()
+                if words:
+                    t = " ".join(w.get("text", "") for w in words)
+
+                # 2) standard extraction
+                if not t:
+                    t = p.extract_text()
+
+                # 3) layout-aware fallback
                 if not t:
                     t = p.extract_text(layout=True)
 
-                # 3) tolerance-based fallback (shifted footer text)
+                # 4) tolerance fallback (fix shifted footer/header)
                 if not t:
-                    t = p.extract_text(x_tolerance=2, y_tolerance=2)
+                    t = p.extract_text(x_tolerance=3, y_tolerance=3)
 
-                # 4) last resort: word reconstruction
+                # 5) full-page safety crop fallback
                 if not t:
-                    words = p.extract_words()
+                    cropped = p.crop((0, 0, p.width, p.height))
+                    words = cropped.extract_words()
                     if words:
                         t = " ".join(w.get("text", "") for w in words)
 
@@ -302,7 +314,7 @@ parser = DocumentParser()
 ai = AIEngine()
 
 # =========================
-# HELPERS (UNCHANGED)
+# HELPERS
 # =========================
 def upload(label, key, state):
     f = st.file_uploader(label, key=key)
@@ -355,7 +367,7 @@ def replace_docx(doc, repl):
 
 
 # =========================
-# UI (UNCHANGED)
+# UI
 # =========================
 st.set_page_config(page_title="Contract AI", layout="wide")
 st.title("📄 Contract AI Engine (Single Page)")
