@@ -214,7 +214,7 @@ OUTPUT FORMAT:
 
 
 # =========================
-# DOCUMENT PARSER (ONLY FIX HERE)
+# DOCUMENT PARSER (FIXED FOOTER BUG - MINIMAL CHANGE)
 # =========================
 class DocumentParser:
 
@@ -231,9 +231,7 @@ class DocumentParser:
         ocr_text = self._ocr(path)
         return {"text": self._merge(text_layer, ocr_text)}
 
-    # =========================
-    # FIX: ROBUST FOOTER EXTRACTION (DEPLOY SAFE)
-    # =========================
+    # 🔥 FIX: footer-safe extraction (deploy stable)
     def _text_layer(self, path):
         out = []
 
@@ -242,8 +240,8 @@ class DocumentParser:
 
                 t = None
 
-                # 1) 🔥 most robust in cloud: word-based extraction
-                words = p.extract_words()
+                # 1) strongest: words (fixes footer in most cloud PDFs)
+                words = p.extract_words(use_text_flow=True, keep_blank_chars=True)
                 if words:
                     t = " ".join(w.get("text", "") for w in words)
 
@@ -251,22 +249,31 @@ class DocumentParser:
                 if not t:
                     t = p.extract_text()
 
-                # 3) layout-aware fallback
+                # 3) layout fallback
                 if not t:
                     t = p.extract_text(layout=True)
 
-                # 4) tolerance fallback (fix shifted footer/header)
+                # 4) tolerance fallback (footer shift fix)
                 if not t:
                     t = p.extract_text(x_tolerance=3, y_tolerance=3)
 
-                # 5) full-page safety crop fallback
+                # 5) CRITICAL FIX: footer is often isolated → crop bottom area
                 if not t:
-                    cropped = p.crop((0, 0, p.width, p.height))
-                    words = cropped.extract_words()
+                    bottom = p.crop((0, p.height * 0.75, p.width, p.height))
+                    words = bottom.extract_words()
+                    if words:
+                        t = " ".join(w.get("text", "") for w in words)
+
+                # 6) last resort: full crop retry
+                if not t:
+                    full = p.crop((0, 0, p.width, p.height))
+                    words = full.extract_words()
                     if words:
                         t = " ".join(w.get("text", "") for w in words)
 
                 if t:
+                    # normalize spacing (important for footer numbers / dates)
+                    t = re.sub(r"\s+", " ", t).strip()
                     out.append(t)
 
         return "\n".join(out)
